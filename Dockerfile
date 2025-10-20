@@ -1,4 +1,4 @@
-# Athleton MVP - Dockerfile (Render-ready)
+# AthletON - Dockerfile (Render-ready)
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -14,9 +14,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-COPY athleton_mvp.py ./
-COPY .streamlit ./\.streamlit/
+# Copiamos la app principal
+COPY athleton_app.py ./
 
+# ✅ Creamos la carpeta .streamlit y el config dentro durante el build
+RUN mkdir -p /app/.streamlit && printf "[server]\nheadless = true\nenableCORS = false\n\n[browser]\ngatherUsageStats = false\n" > /app/.streamlit/config.toml
+
+# Base de datos local (demo)
 ENV ATHLETON_DB=/app/athleton.db
 
-CMD ["/bin/sh", "-c", "streamlit run athleton_mvp.py --server.port $PORT --server.address 0.0.0.0"]
+# Lanzar Streamlit en el puerto que Render asigna
+CMD ["/bin/sh", "-c", "streamlit run athleton_app.py --server.port $PORT --server.address 0.0.0.0"]
