@@ -260,9 +260,9 @@ def login_view():
 
 def signup_view():
     st.header("Crear cuenta")
-    name = st.text_input("Nombre")
-    email = st.text_input("Email")
-    password = st.text_input("Contraseña", type="password")
+    name = st.text_input("Nombre", key="signup_name")
+    email = st.text_input("Email", key="signup_email")
+    password = st.text_input("Contraseña", type="password", key="signup_password")
     if st.button("Registrarme", type="primary", use_container_width=True):
         if get_user_by_email(email.strip()):
             st.error("Ese email ya existe.")
