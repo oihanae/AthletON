@@ -256,7 +256,7 @@ def login_view():
             st.error("Credenciales no válidas.")
         else:
             st.session_state["user"] = dict(u)
-            st.experimental_rerun()
+            st.rerun()
 
 def signup_view():
     st.header("Crear cuenta")
@@ -308,7 +308,8 @@ def onboarding_view(user_id):
             kcal_target=kcal, carbs_pct=c, protein_pct=p, fat_pct=f
         )
         set_plan(user_id, generate_plan_from_profile(get_profile(user_id)))
-        st.success("Perfil guardado y plan generado."); st.experimental_rerun()
+        st.success("Perfil guardado y plan generado.")
+        st.rerun()
 
 def profile_view(user_id):
     st.subheader("Perfil")
@@ -445,7 +446,7 @@ def main():
 
     user = st.session_state["user"]
     st.sidebar.write(f"**{user.get('name') or user['email']}**")
-    if st.sidebar.button("Cerrar sesión"): del st.session_state["user"]; st.experimental_rerun()
+    if st.sidebar.button("Cerrar sesión"): del st.session_state["user"]; st.rerun()
 
     if needs_onboarding(user["id"]): onboarding_view(user["id"]); return
 
