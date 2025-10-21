@@ -1,0 +1,24 @@
+# AthletON - Dockerfile (Render ready, robust .streamlit handling)
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY athleton_app.py ./
+
+# Crea .streamlit/config.toml en tiempo de build (evita el error de antes)
+RUN mkdir -p /app/.streamlit && printf "[server]\nheadless = true\nenableCORS = false\n\n[browser]\ngatherUsageStats = false\n" > /app/.streamlit/config.toml
+
+ENV ATHLETON_DB=/app/athleton.db
+
+CMD ["/bin/sh", "-c", "streamlit run athleton_app.py --server.port $PORT --server.address 0.0.0.0"]
