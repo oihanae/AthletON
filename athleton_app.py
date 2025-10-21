@@ -248,8 +248,8 @@ def ai_coach_response(prompt, profile, workouts_df):
 # ---------------------- UI ----------------------
 def login_view():
     st.header("Inicia sesión")
-    email = st.text_input("Email")
-    password = st.text_input("Contraseña", type="password")
+    email = st.text_input("Email", key="login_email")
+    password = st.text_input("Contraseña", type="password", key="login_password")
     if st.button("Entrar", type="primary", use_container_width=True):
         u = get_user_by_email(email.strip())
         if not u or u["password_hash"] != hash_pw(password):
