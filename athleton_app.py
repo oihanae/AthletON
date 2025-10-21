@@ -6,16 +6,17 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-# ===== IA opcional (OpenAI) =====
-AI_ENABLED = False
-try:
-    from openai import OpenAI
-    if os.getenv("OPENAI_API_KEY"):
-        AI_ENABLED = True
-except Exception:
-    AI_ENABLED = False
-
-DB_PATH = os.getenv("ATHLETON_DB", "athleton.db")
+# ===== IA (OpenAI) =====
+def get_openai_client():
+    """Devuelve un cliente de OpenAI si hay clave; si no, None y el motivo."""
+    key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not key:
+        return None, "Falta OPENAI_API_KEY"
+    try:
+        from openai import OpenAI
+        return OpenAI(api_key=key), None
+    except Exception as e:
+        return None, f"Error importando openai: {e}"
 
 # ---------------------- DB ----------------------
 def get_conn():
@@ -227,19 +228,24 @@ def get_workouts(user_id, start=None, end=None):
 
 # ---------- IA ----------
 def ai_coach_response(prompt, profile, workouts_df):
-    if not AI_ENABLED:
-        return "(IA desactivada) Añade OPENAI_API_KEY en Settings → Environment para activarla."
+    client, err = get_openai_client()
+    if not client:
+        return f"(IA desactivada) {err}. Añade la variable en Render → Settings → Environment."
+
     try:
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         ctx = f"Perfil: {dict(profile) if profile else {}}\n\nEntrenos recientes:\n{workouts_df.head(50).to_string(index=False)}"
-        user_msg = "Eres un entrenador y nutricionista. Responde con pasos concretos, seguros y personalizados.\n"\
-                   f"Pregunta: {prompt}\n\nContexto:\n{ctx}\n"
+        user_msg = (
+            "Eres un entrenador y nutricionista. Responde con pasos concretos, seguros y personalizados.\n"
+            f"Pregunta: {prompt}\n\nContexto:\n{ctx}\n"
+        )
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
             temperature=0.4,
-            messages=[{"role":"system","content":"Coach experto. Sé específico, breve y seguro."},
-                      {"role":"user","content": user_msg}],
-            max_tokens=450
+            messages=[
+                {"role": "system", "content": "Coach experto. Sé específico, breve y seguro."},
+                {"role": "user", "content": user_msg},
+            ],
+            max_tokens=450,
         )
         return resp.choices[0].message.content.strip()
     except Exception as e:
