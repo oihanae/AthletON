@@ -1,0 +1,5 @@
+streamlit==1.38.0
+pandas==2.2.2
+matplotlib==3.8.4
+sqlalchemy==2.0.32
+openai==1.51.0
