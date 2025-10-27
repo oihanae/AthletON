@@ -17,80 +17,258 @@ def get_openai_client():
         return OpenAI(api_key=key), None
     except Exception as e:
         return None, f"Error importando openai: {e}"
-
 # ---------------------- DB ----------------------
-DB_PATH = os.getenv("ATHLETON_DB", "athleton.db")
+# Si hay DATABASE_URL usamos PostgreSQL; si no, SQLite (local)
+DB_URL = os.getenv("DATABASE_URL", "").strip()
+USE_PG = bool(DB_URL)
+
+if USE_PG:
+    from sqlalchemy import create_engine, text
+    engine = create_engine(DB_URL, pool_pre_ping=True)
+else:
+    DB_PATH = os.getenv("ATHLETON_DB", "athleton.db")
+    import sqlite3
+
 def get_conn():
+    if USE_PG:
+        return engine.connect()
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
 def init_db():
-    conn = get_conn()
-    cur = conn.cursor()
+    if USE_PG:
+        with engine.begin() as conn:
+            conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS users (
+              id SERIAL PRIMARY KEY,
+              email TEXT UNIQUE NOT NULL,
+              password_hash TEXT NOT NULL,
+              name TEXT
+            );"""))
+            conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS profiles (
+              user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+              sex TEXT, age INTEGER, height_cm REAL, weight_kg REAL,
+              objective TEXT, experience TEXT, availability_days INTEGER,
+              injuries TEXT, equipment TEXT, diet_pref TEXT, restrictions TEXT,
+              sleep_h REAL, stress TEXT,
+              kcal_target REAL, carbs_pct REAL, protein_pct REAL, fat_pct REAL,
+              updated_at TEXT
+            );"""))
+            conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS plans (
+              id SERIAL PRIMARY KEY,
+              user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              weekday INTEGER NOT NULL,
+              title TEXT NOT NULL,
+              details TEXT
+            );"""))
+            conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS workouts (
+              id SERIAL PRIMARY KEY,
+              user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              wdate DATE NOT NULL,
+              wtype TEXT NOT NULL,
+              duration_min REAL,
+              distance_km REAL,
+              rpe INTEGER,
+              notes TEXT,
+              created_at TIMESTAMP NOT NULL
+            );"""))
+    else:
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          email TEXT UNIQUE NOT NULL,
+          password_hash TEXT NOT NULL,
+          name TEXT
+        );""")
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS profiles (
+          user_id INTEGER PRIMARY KEY,
+          sex TEXT, age INTEGER, height_cm REAL, weight_kg REAL,
+          objective TEXT, experience TEXT, availability_days INTEGER,
+          injuries TEXT, equipment TEXT, diet_pref TEXT, restrictions TEXT,
+          sleep_h REAL, stress TEXT,
+          kcal_target REAL, carbs_pct REAL, protein_pct REAL, fat_pct REAL,
+          updated_at TEXT,
+          FOREIGN KEY(user_id) REFERENCES users(id)
+        );""")
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS plans (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          weekday INTEGER NOT NULL,
+          title TEXT NOT NULL,
+          details TEXT,
+          FOREIGN KEY(user_id) REFERENCES users(id)
+        );""")
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS workouts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          wdate TEXT NOT NULL,
+          wtype TEXT NOT NULL,
+          duration_min REAL,
+          distance_km REAL,
+          rpe INTEGER,
+          notes TEXT,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(user_id) REFERENCES users(id)
+        );""")
+        conn.commit()
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        name TEXT
-    );
-    """)
+# helpers
+def fetchone(query, params):
+    if USE_PG:
+        with engine.begin() as conn:
+            row = conn.execute(text(query), params).mappings().first()
+            return row
+    else:
+        cur = get_conn().cursor(); cur.execute(query, params); return cur.fetchone()
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS profiles (
-        user_id INTEGER PRIMARY KEY,
-        sex TEXT,
-        age INTEGER,
-        height_cm REAL,
-        weight_kg REAL,
-        objective TEXT,
-        experience TEXT,
-        availability_days INTEGER,
-        injuries TEXT,
-        equipment TEXT,
-        diet_pref TEXT,
-        restrictions TEXT,
-        sleep_h REAL,
-        stress TEXT,
-        kcal_target REAL,
-        carbs_pct REAL,
-        protein_pct REAL,
-        fat_pct REAL,
-        updated_at TEXT,
-        FOREIGN KEY(user_id) REFERENCES users(id)
-    );
-    """)
+def fetchall(query, params):
+    if USE_PG:
+        with engine.begin() as conn:
+            return list(conn.execute(text(query), params).mappings().all())
+    else:
+        cur = get_conn().cursor(); cur.execute(query, params); return cur.fetchall()
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS plans (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        weekday INTEGER NOT NULL,
-        title TEXT NOT NULL,
-        details TEXT,
-        FOREIGN KEY(user_id) REFERENCES users(id)
-    );
-    """)
+def execute(query, params):
+    if USE_PG:
+        with engine.begin() as conn:
+            conn.execute(text(query), params)
+    else:
+        cur = get_conn().cursor(); cur.execute(query, params); cur.connection.commit()
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS workouts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        wdate TEXT NOT NULL,
-        wtype TEXT NOT NULL,
-        duration_min REAL,
-        distance_km REAL,
-        rpe INTEGER,
-        notes TEXT,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY(user_id) REFERENCES users(id)
-    );
-    """)
-    conn.commit()
+def executemany(query, rows_param_dicts):
+    if USE_PG:
+        with engine.begin() as conn:
+            conn.execute(text(query), rows_param_dicts)
+    else:
+        cur = get_conn().cursor()
+        cur.executemany(query, [tuple(d.values()) for d in rows_param_dicts])
+        cur.connection.commit()
 
-# ---------------------- Auth (demo) ----------------------
+# USERS
+def get_user_by_email(email):
+    if USE_PG:
+        return fetchone("SELECT id,email,password_hash,name FROM users WHERE LOWER(email)=LOWER(:email)", {"email": email.lower()})
+    return fetchone("SELECT * FROM users WHERE email=?", (email.lower(),))
+
+def create_user(email, password, name):
+    import hashlib
+    pw = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    if USE_PG:
+        with engine.begin() as conn:
+            new_id = conn.execute(
+                text("INSERT INTO users (email,password_hash,name) VALUES (:e,:p,:n) RETURNING id"),
+                {"e": email.lower(), "p": pw, "n": name}
+            ).scalar_one()
+            return new_id
+    else:
+        cur = get_conn().cursor()
+        cur.execute("INSERT INTO users (email,password_hash,name) VALUES (?,?,?)", (email.lower(), pw, name))
+        cur.connection.commit()
+        return cur.lastrowid
+
+# PROFILES
+def get_profile(user_id):
+    if USE_PG:
+        return fetchone("SELECT * FROM profiles WHERE user_id=:uid", {"uid": user_id})
+    return fetchone("SELECT * FROM profiles WHERE user_id=?", (user_id,))
+
+def upsert_profile(user_id, **kwargs):
+    fields = ["sex","age","height_cm","weight_kg","objective","experience","availability_days","injuries","equipment","diet_pref","restrictions","sleep_h","stress","kcal_target","carbs_pct","protein_pct","fat_pct"]
+    data = {k: kwargs.get(k) for k in fields}
+    data["updated_at"] = datetime.utcnow().isoformat()
+    data["user_id"] = user_id
+
+    if USE_PG:
+        execute("""
+        INSERT INTO profiles (user_id, sex, age, height_cm, weight_kg, objective, experience, availability_days, injuries, equipment, diet_pref, restrictions, sleep_h, stress, kcal_target, carbs_pct, protein_pct, fat_pct, updated_at)
+        VALUES (:user_id, :sex, :age, :height_cm, :weight_kg, :objective, :experience, :availability_days, :injuries, :equipment, :diet_pref, :restrictions, :sleep_h, :stress, :kcal_target, :carbs_pct, :protein_pct, :fat_pct, :updated_at)
+        ON CONFLICT (user_id) DO UPDATE SET
+          sex=EXCLUDED.sex, age=EXCLUDED.age, height_cm=EXCLUDED.height_cm, weight_kg=EXCLUDED.weight_kg,
+          objective=EXCLUDED.objective, experience=EXCLUDED.experience, availability_days=EXCLUDED.availability_days,
+          injuries=EXCLUDED.injuries, equipment=EXCLUDED.equipment, diet_pref=EXCLUDED.diet_pref, restrictions=EXCLUDED.restrictions,
+          sleep_h=EXCLUDED.sleep_h, stress=EXCLUDED.stress,
+          kcal_target=EXCLUDED.kcal_target, carbs_pct=EXCLUDED.carbs_pct, protein_pct=EXCLUDED.protein_pct, fat_pct=EXCLUDED.fat_pct,
+          updated_at=EXCLUDED.updated_at
+        """, data)
+    else:
+        existing = get_profile(user_id)
+        if existing:
+            sets = ", ".join([f"{k}=?" for k in ["sex","age","height_cm","weight_kg","objective","experience","availability_days","injuries","equipment","diet_pref","restrictions","sleep_h","stress","kcal_target","carbs_pct","protein_pct","fat_pct","updated_at"]])
+            vals = [data[k] for k in ["sex","age","height_cm","weight_kg","objective","experience","availability_days","injuries","equipment","diet_pref","restrictions","sleep_h","stress","kcal_target","carbs_pct","protein_pct","fat_pct","updated_at"]] + [user_id]
+            execute(f"UPDATE profiles SET {sets} WHERE user_id=?", tuple(vals))
+        else:
+            cols = ",".join(["user_id"] + [k for k in data.keys() if k!="user_id"])
+            placeholders = ",".join(["?"]*(1+len(data)-1))
+            vals = [user_id] + [data[k] for k in data.keys() if k!="user_id"]
+            execute(f"INSERT INTO profiles ({cols}) VALUES ({placeholders})", tuple(vals))
+
+def needs_onboarding(user_id):
+    p = get_profile(user_id)
+    if not p: return True
+    required = ["objective","experience","availability_days"]
+    return any((p[r] is None or p[r]=="" or (r=="availability_days" and (p[r] or 0)<2)) for r in required)
+
+# PLANS
+def get_plan(user_id):
+    if USE_PG:
+        return fetchall("SELECT * FROM plans WHERE user_id=:uid ORDER BY weekday ASC", {"uid": user_id})
+    return fetchall("SELECT * FROM plans WHERE user_id=? ORDER BY weekday ASC", (user_id,))
+
+def set_plan(user_id, items):
+    if USE_PG:
+        execute("DELETE FROM plans WHERE user_id=:uid", {"uid": user_id})
+        rows = [{"uid": user_id, "wd": wd, "t": t, "d": d} for (wd,t,d) in items]
+        executemany("INSERT INTO plans (user_id,weekday,title,details) VALUES (:uid,:wd,:t,:d)", rows)
+    else:
+        execute("DELETE FROM plans WHERE user_id=?", (user_id,))
+        cur = get_conn().cursor()
+        cur.executemany("INSERT INTO plans (user_id,weekday,title,details) VALUES (?,?,?,?)", [(user_id, wd, t, d) for (wd,t,d) in items])
+        cur.connection.commit()
+
+# WORKOUTS
+def insert_workout(user_id, wdate, wtype, duration_min, distance_km, rpe, notes):
+    now = datetime.utcnow().isoformat()
+    if USE_PG:
+        execute(
+            "INSERT INTO workouts (user_id,wdate,wtype,duration_min,distance_km,rpe,notes,created_at) VALUES (:u,:wd,:wt,:dur,:dist,:rpe,:notes,:now)",
+            {"u": user_id, "wd": wdate.isoformat(), "wt": wtype, "dur": duration_min, "dist": distance_km, "rpe": rpe, "notes": notes, "now": now}
+        )
+    else:
+        execute(
+            "INSERT INTO workouts (user_id,wdate,wtype,duration_min,distance_km,rpe,notes,created_at) VALUES (?,?,?,?,?,?,?,?)",
+            (user_id, wdate.isoformat(), wtype, duration_min, distance_km, rpe, notes, now)
+        )
+
+def get_workouts(user_id, start=None, end=None):
+    if USE_PG:
+        import pandas as pd
+        query = "SELECT wdate::date AS wdate, wtype, duration_min, distance_km, rpe, notes FROM workouts WHERE user_id=:u"
+        params = {"u": user_id}
+        if start:
+            query += " AND wdate >= :s"; params["s"] = start.isoformat()
+        if end:
+            query += " AND wdate <= :e"; params["e"] = end.isoformat()
+        query += " ORDER BY wdate DESC"
+        return pd.read_sql(text(query), engine, params=params, parse_dates=["wdate"])
+    else:
+        import pandas as pd
+        conn = get_conn()
+        q = "SELECT wdate,wtype,duration_min,distance_km,rpe,notes FROM workouts WHERE user_id=?"
+        params=[user_id]
+        if start: q+=" AND date(wdate) >= date(?)"; params.append(start.isoformat())
+        if end: q+=" AND date(wdate) <= date(?)"; params.append(end.isoformat())
+        q+=" ORDER BY wdate DESC"
+        return pd.read_sql_query(q, conn, params=params, parse_dates=["wdate"])
+# ---------------------- fin DB ----------------------
+
 import hashlib
 def hash_pw(pw): return hashlib.sha256(pw.encode("utf-8")).hexdigest()
 
